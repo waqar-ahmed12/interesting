@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Customizable Network with Random Connections</title>
+  <style>
+    body { margin: 0; overflow: hidden; background: black; }
+    canvas { display: block; }
+    .controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: Arial, sans-serif;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+    }
+    button {
+      background: #444;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      margin: 5px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    button:hover {
+      background: #666;
+    }
+    input, select {
+      margin: 5px;
+      padding: 3px;
+    }
+    label {
+      display: block;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div class="controls">
+    <label for="pointCount">Number of Points: <span id="pointCountValue">300</span></label>
+    <input type="range" id="pointCount" min="50" max="1000" value="300" step="50">
+    
+    <label for="connectionCount">Random Connections Per Point: <span id="connectionCountValue">3</span></label>
+    <input type="range" id="connectionCount" min="1" max="10" value="3">
+    
+    <label for="connectionDistance">Connection Distance: <span id="connectionDistanceValue">100</span></label>
+    <input type="range" id="connectionDistance" min="20" max="200" value="100" step="10">
+    
+    <button id="freezeBtn">Freeze Network</button>
+    <button id="resetBtn">Generate New Network</button>
+  </div>
+  <script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const freezeBtn = document.getElementById('freezeBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const pointCountSlider = document.getElementById('pointCount');
+    const pointCountValue = document.getElementById('pointCountValue');
+    const connectionCountSlider = document.getElementById('connectionCount');
+    const connectionCountValue = document.getElementById('connectionCountValue');
+    const connectionDistanceSlider = document.getElementById('connectionDistance');
+    const connectionDistanceValue = document.getElementById('connectionDistanceValue');
+    
+    // Set canvas to full window size
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    
+    // Network parameters
+    let numPoints = parseInt(pointCountSlider.value);
+    let connectionDistance = parseInt(connectionDistanceSlider.value);
+    let connectionsPerPoint = parseInt(connectionCountSlider.value);
+    const points = [];
+    const connections = [];
+    let frozen = false;
+    
+    // Update display values
+    pointCountSlider.addEventListener('input', function() {
+      pointCountValue.textContent = this.value;
+      numPoints = parseInt(this.value);
+    });
+    
+    connectionCountSlider.addEventListener('input', function() {
+      connectionCountValue.textContent = this.value;
+      connectionsPerPoint = parseInt(this.value);
+    });
+    
+    connectionDistanceSlider.addEventListener('input', function() {
+      connectionDistanceValue.textContent = this.value;
+      connectionDistance = parseInt(this.value);
+    });
+    
+    // Create random connection between points
+    function createRandomConnections() {
+      connections.length = 0;
+      
+      for (let i = 0; i < numPoints; i++) {
+        const connectedPoints = new Set();
+        
+        // Add random connections for each point
+        for (let j = 0; j < connectionsPerPoint; j++) {
+          let targetIndex;
+          
+          // Find a target point that's not itself and not already connected
+          do {
+            targetIndex = Math.floor(Math.random() * numPoints);
+          } while (targetIndex === i || connectedPoints.has(targetIndex));
+          
+          connectedPoints.add(targetIndex);
+          connections.push({
+            source: i,
+            target: targetIndex
+          });
+        }
+      }
+    }
+    
+    // Create points with initial positions
+    function initializePoints() {
+      points.length = 0;
+      for (let i = 0; i < numPoints; i++) {
+        points.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          vx: (Math.random() - 0.5) * 1,
+          vy: (Math.random() - 0.5) * 1,
+          size: Math.random() * 1.5 + 0.5 // Varied point sizes
+        });
+      }
+      createRandomConnections();
+    }
+    
+    // Initialize points
+    initializePoints();
+    
+    // Mouse tracking
+    let mouse = { x: null, y: null };
+    let mouseRadius = 150;
+    let mousePressed = false;
+    
+    canvas.addEventListener('mousemove', (e) => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    });
+    
+    canvas.addEventListener('mousedown', () => {
+      mousePressed = true;
+    });
+    
+    canvas.addEventListener('mouseup', () => {
+      mousePressed = false;
+    });
+    
+    canvas.addEventListener('touchstart', (e) => {
+      e.preventDefault();
+      mousePressed = true;
+      mouse.x = e.touches[0].clientX;
+      mouse.y = e.touches[0].clientY;
+    });
+    
+    canvas.addEventListener('touchend', () => {
+      mousePressed = false;
+    });
+    
+    canvas.addEventListener('touchmove', (e) => {
+      e.preventDefault();
+      mouse.x = e.touches[0].clientX;
+      mouse.y = e.touches[0].clientY;
+    });
+    
+    // Freeze and reset buttons
+    freezeBtn.addEventListener('click', () => {
+      frozen = !frozen;
+      freezeBtn.textContent = frozen ? "Unfreeze Network" : "Freeze Network";
+    });
+    
+    resetBtn.addEventListener('click', () => {
+      frozen = false;
+      freezeBtn.textContent = "Freeze Network";
+      initializePoints();
+    });
+    
+    // Animation loop
+    function animate() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      // Update and draw points
+      if (!frozen) {
+        for (let i = 0; i < points.length; i++) {
+          const point = points[i];
+          
+          // Move points
+          point.x += point.vx;
+          point.y += point.vy;
+          
+          // Apply damping to gradually slow down
+          point.vx *= 0.995;
+          point.vy *= 0.995;
+          
+          // Bounce off edges
+          if (point.x <= 0 || point.x >= canvas.width) point.vx *= -1;
+          if (point.y <= 0 || point.y >= canvas.height) point.vy *= -1;
+          
+          // Mouse interaction
+          if (mouse.x && mouse.y && mousePressed) {
+            const dx = mouse.x - point.x;
+            const dy = mouse.y - point.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < mouseRadius) {
+              const angle = Math.atan2(dy, dx);
+              const force = (mouseRadius - distance) / mouseRadius;
+              point.vx -= Math.cos(angle) * force * 0.8;
+              point.vy -= Math.sin(angle) * force * 0.8;
+            }
+          }
+        }
+      }
+      
+      // Draw fixed random connections
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 0.3;
+      
+      for (const connection of connections) {
+        const source = points[connection.source];
+        const target = points[connection.target];
+        
+        ctx.beginPath();
+        ctx.moveTo(source.x, source.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
+      }
+      
+      // Draw proximity-based connections
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        
+        for (let j = i + 1; j < points.length; j++) {
+          const otherPoint = points[j];
+          const dx = point.x - otherPoint.x;
+          const dy = point.y - otherPoint.y;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance < connectionDistance) {
+            // Calculate opacity based on distance
+            const opacity = 1 - (distance / connectionDistance);
+            ctx.strokeStyle = `rgba(255, 255, 255, ${opacity * 0.3})`;
+            
+            ctx.beginPath();
+            ctx.moveTo(point.x, point.y);
+            ctx.lineTo(otherPoint.x, otherPoint.y);
+            ctx.stroke();
+          }
+        }
+      }
+      
+      // Draw points after connections
+      for (let i = 0; i < points.length; i++) {
+        const point = points[i];
+        
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, point.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      
+      requestAnimationFrame(animate);
+    }
+    
+    animate();
+    
+    // Resize canvas when window is resized
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+    
+    // After 5 seconds, freeze the network automatically to show the mature state
+    setTimeout(() => {
+      frozen = true;
+      freezeBtn.textContent = "Unfreeze Network";
+    }, 5000);
+    
+    // Apply changes when sliders change and reset is clicked
+    [pointCountSlider, connectionCountSlider, connectionDistanceSlider].forEach(slider => {
+      slider.addEventListener('change', () => {
+        resetBtn.click();
+      });
+    });
+  </script>
+</body>
+</html>

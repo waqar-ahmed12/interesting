@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>D3 Force-Directed Network with Optimized Performance</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: black;
+      font-family: Arial, sans-serif;
+    }
+    svg {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    .controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      max-width: 300px;
+    }
+    button {
+      background: #444;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      margin: 5px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    button:hover {
+      background: #666;
+    }
+    input, select {
+      margin: 5px;
+      padding: 3px;
+      width: 180px;
+    }
+    label {
+      display: block;
+      margin-top: 8px;
+    }
+    .tips {
+      font-size: 12px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid #444;
+    }
+    .link {
+      stroke: rgba(255, 255, 255, 0.2);
+      stroke-width: 0.5px;
+    }
+    .node {
+      fill: white;
+    }
+  </style>
+</head>
+<body>
+  <div class="controls">
+    <label for="nodeCount">Number of Nodes: <span id="nodeCountValue">200</span></label>
+    <input type="range" id="nodeCount" min="50" max="1000" value="200" step="50">
+    
+    <label for="linkCount">Links Per Node: <span id="linkCountValue">3</span></label>
+    <input type="range" id="linkCount" min="1" max="10" value="3">
+    
+    <label for="linkDistance">Link Distance: <span id="linkDistanceValue">80</span></label>
+    <input type="range" id="linkDistance" min="30" max="200" value="80" step="10">
+    
+    <label for="zoomSensitivity">Zoom Sensitivity: <span id="zoomSensitivityValue">50</span>%</label>
+    <input type="range" id="zoomSensitivity" min="10" max="100" value="50">
+    
+    <button id="resetBtn">Generate New Network</button>
+    <button id="centerBtn">Zoom to Center</button>
+    <button id="toggleSimulation">Pause Simulation</button>
+    
+    <div class="tips">
+      <strong>Controls:</strong><br>
+      - Mouse drag: Move network<br>
+      - Mouse wheel: Zoom in/out<br>
+      - Double-click: Zoom in at point<br>
+      - "Zoom to Center" button: Reset and center view
+    </div>
+  </div>
+  
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+  <script>
+    // Get UI elements
+    const nodeCountSlider = document.getElementById('nodeCount');
+    const nodeCountValue = document.getElementById('nodeCountValue');
+    const linkCountSlider = document.getElementById('linkCount');
+    const linkCountValue = document.getElementById('linkCountValue');
+    const linkDistanceSlider = document.getElementById('linkDistance');
+    const linkDistanceValue = document.getElementById('linkDistanceValue');
+    const zoomSensitivitySlider = document.getElementById('zoomSensitivity');
+    const zoomSensitivityValue = document.getElementById('zoomSensitivityValue');
+    const resetBtn = document.getElementById('resetBtn');
+    const centerBtn = document.getElementById('centerBtn');
+    const toggleSimulationBtn = document.getElementById('toggleSimulation');
+    
+    // Network parameters
+    let nodeCount = parseInt(nodeCountSlider.value);
+    let linksPerNode = parseInt(linkCountSlider.value);
+    let linkDistance = parseInt(linkDistanceSlider.value);
+    let zoomSensitivity = parseInt(zoomSensitivitySlider.value) / 100;
+    let simulationRunning = true;
+    
+    // Update display values
+    nodeCountSlider.addEventListener('input', function() {
+      nodeCountValue.textContent = this.value;
+    });
+    
+    linkCountSlider.addEventListener('input', function() {
+      linkCountValue.textContent = this.value;
+    });
+    
+    linkDistanceSlider.addEventListener('input', function() {
+      linkDistanceValue.textContent = this.value;
+    });
+    
+    zoomSensitivitySlider.addEventListener('input', function() {
+      zoomSensitivityValue.textContent = this.value;
+      zoomSensitivity = parseInt(this.value) / 100;
+      // Update zoom behavior sensitivity
+      zoom.scaleExtent([0.1, 10 * zoomSensitivity]);
+    });
+    
+    // Setup SVG container
+    const width = window.innerWidth;
+    const height = window.innerHeight;
+    
+    // Create SVG element
+    const svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height);
+    
+    // Add a group for zoom transformations
+    const g = svg.append("g");
+    
+    // Add zoom behavior
+    const zoom = d3.zoom()
+      .scaleExtent([0.1, 10 * zoomSensitivity])
+      .on("zoom", (event) => {
+        g.attr("transform", event.transform);
+      });
+    
+    svg.call(zoom);
+    
+    // Generate network data
+    function generateNetworkData() {
+      // Update parameters
+      nodeCount = parseInt(nodeCountSlider.value);
+      linksPerNode = parseInt(linkCountSlider.value);
+      linkDistance = parseInt(linkDistanceSlider.value);
+      
+      // Generate nodes
+      const nodes = Array.from({ length: nodeCount }, (_, i) => ({
+        id: i,
+        // Random initial position in a circle
+        x: width / 2 + (Math.random() - 0.5) * width * 0.8,
+        y: height / 2 + (Math.random() - 0.5) * height * 0.8,
+        radius: Math.random() * 3 + 1 // Varied node sizes
+      }));
+      
+      // Generate links with random connections
+      const links = [];
+      
+      nodes.forEach(source => {
+        // Create a set to track connected nodes
+        const connectedNodes = new Set();
+        
+        // Add random connections for each node
+        for (let j = 0; j < linksPerNode; j++) {
+          // Get random target node that's not itself and not already connected
+          let targetIndex;
+          do {
+            targetIndex = Math.floor(Math.random() * nodeCount);
+          } while (targetIndex === source.id || connectedNodes.has(targetIndex));
+          
+          connectedNodes.add(targetIndex);
+          links.push({
+            source: source.id,
+            target: targetIndex,
+            value: Math.random() // Will be used for opacity
+          });
+        }
+      });
+      
+      return { nodes, links };
+    }
+    
+    // Initialize the force simulation
+    let simulation;
+    
+    function initializeSimulation(data) {
+      // Clear previous network
+      g.selectAll("*").remove();
+      
+      if (simulation) {
+        simulation.stop();
+      }
+      
+      // Create force simulation
+      simulation = d3.forceSimulation(data.nodes)
+        .force("link", d3.forceLink(data.links)
+          .id(d => d.id)
+          .distance(linkDistance))
+        .force("charge", d3.forceManyBody().strength(-30))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(d => d.radius + 2))
+        .alpha(1)
+        .alphaDecay(0.01);
+      
+      // Create links
+      const link = g.selectAll(".link")
+        .data(data.links)
+        .enter()
+        .append("line")
+        .attr("class", "link")
+        .style("opacity", d => 0.2 + d.value * 0.3);
+      
+      // Create nodes
+      const node = g.selectAll(".node")
+        .data(data.nodes)
+        .enter()
+        .append("circle")
+        .attr("class", "node")
+        .attr("r", d => d.radius)
+        .style("opacity", 0.7);
+      
+      // Add drag behavior
+      node.call(d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended));
+      
+      // Update positions on each tick
+      simulation.on("tick", () => {
+        link
+          .attr("x1", d => d.source.x)
+          .attr("y1", d => d.source.y)
+          .attr("x2", d => d.target.x)
+          .attr("y2", d => d.target.y);
+        
+        node
+          .attr("cx", d => d.x)
+          .attr("cy", d => d.y);
+      });
+      
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+      
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+      
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+      
+      // Center the view
+      zoomToCenter();
+    }
+    
+    // Create initial network
+    const initialData = generateNetworkData();
+    initializeSimulation(initialData);
+    
+    // Reset zoom and center the view
+    function zoomToCenter() {
+      svg.transition()
+        .duration(750)
+        .call(zoom.transform, d3.zoomIdentity
+          .translate(width / 2, height / 2)
+          .scale(0.8)
+          .translate(-width / 2, -height / 2));
+    }
+    
+    // Button handlers
+    resetBtn.addEventListener('click', () => {
+      const newData = generateNetworkData();
+      initializeSimulation(newData);
+    });
+    
+    centerBtn.addEventListener('click', zoomToCenter);
+    
+    toggleSimulationBtn.addEventListener('click', () => {
+      if (simulationRunning) {
+        simulation.stop();
+        toggleSimulationBtn.textContent = "Resume Simulation";
+      } else {
+        simulation.restart();
+        toggleSimulationBtn.textContent = "Pause Simulation";
+      }
+      simulationRunning = !simulationRunning;
+    });
+    
+    // Handle window resize
+    window.addEventListener('resize', () => {
+      const newWidth = window.innerWidth;
+      const newHeight = window.innerHeight;
+      
+      svg.attr("width", newWidth)
+         .attr("height", newHeight);
+      
+      // Update center force
+      if (simulation) {
+        simulation.force("center", d3.forceCenter(newWidth / 2, newHeight / 2));
+        simulation.alpha(0.3).restart();
+      }
+    });
+    
+    // Apply changes when sliders change
+    nodeCountSlider.addEventListener('change', () => resetBtn.click());
+    linkCountSlider.addEventListener('change', () => resetBtn.click());
+    linkDistanceSlider.addEventListener('change', () => {
+      if (simulation) {
+        linkDistance = parseInt(linkDistanceSlider.value);
+        simulation.force("link").distance(linkDistance);
+        simulation.alpha(0.3).restart();
+      }
+    });
+  </script>
+</body>
+</html>
