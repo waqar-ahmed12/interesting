@@ -52,6 +52,16 @@
       flex: 1;
       margin: 0 5px;
     }
+    .gesture-indicator {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: #0f0;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+    }
   </style>
 </head>
 <body>
@@ -89,9 +99,17 @@
       - Mouse drag: Rotate view<br>
       - Mouse wheel: Zoom in/out<br>
       - Shift + drag: Pan view<br>
-      - Double-click: Reset view
+      - Double-click: Reset view<br><br>
+      <strong>Gesture Controls:</strong><br>
+      - Left Hand: Pan with palm, Zoom In with pinch<br>
+      - Right Hand: Rotate with index finger, Zoom Out with pinch<br>
+      - Right Fist→Open: Reset view
     </div>
   </div>
+  
+  <!-- Gesture indicator -->
+  <div class="gesture-indicator" id="gestureInfo">No gesture detected</div>
+  
   <script>
     // Get UI elements
     const pointCountSlider = document.getElementById('pointCount');
@@ -108,6 +126,7 @@
     const resetBtn = document.getElementById('resetBtn');
     const zoomInBtn = document.getElementById('zoomInBtn');
     const zoomOutBtn = document.getElementById('zoomOutBtn');
+    const gestureInfo = document.getElementById('gestureInfo');
     
     // Network parameters
     let numPoints = parseInt(pointCountSlider.value);
@@ -390,9 +409,9 @@
     function zoomIn() {
       // Calculate target position (closer to the center)
       const targetPosition = new THREE.Vector3(
-        camera.position.x * 0.3,
-        camera.position.y * 0.3,
-        camera.position.z * 0.3
+        camera.position.x * 0.8,
+        camera.position.y * 0.8,
+        camera.position.z * 0.8
       );
       
       // Don't go too close
@@ -404,7 +423,14 @@
     }
     
     function zoomOut() {
-      tweenCameraPosition(defaultCameraPosition);
+      // Calculate target position (further from the center)
+      const targetPosition = new THREE.Vector3(
+        camera.position.x * 1.2,
+        camera.position.y * 1.2,
+        camera.position.z * 1.2
+      );
+      
+      tweenCameraPosition(targetPosition);
     }
     
     function tweenCameraPosition(targetPosition) {
@@ -423,9 +449,94 @@
     zoomInBtn.addEventListener('click', zoomIn);
     zoomOutBtn.addEventListener('click', zoomOut);
     
+    // Gesture control integration
+    let lastGestureCheck = 0;
+    const gestureCheckInterval = 50; // ms
+    
+    function checkForGestures() {
+      // Only check at certain intervals to avoid too many requests
+      const now = Date.now();
+      if (now - lastGestureCheck < gestureCheckInterval) {
+        return;
+      }
+      lastGestureCheck = now;
+      
+      fetch('/gestures')
+        .then(response => response.json())
+        .then(data => {
+          if (data && data.gesture !== "None") {
+            handleGesture(data.gesture, data.data);
+            // Update gesture indicator
+            gestureInfo.textContent = `Gesture: ${data.gesture}`;
+            gestureInfo.style.color = '#00ff00'; // Green
+            
+            // Reset color after 1 second
+            setTimeout(() => {
+              gestureInfo.style.color = '#aaaaaa'; // Fade to gray
+            }, 1000);
+          }
+        })
+        .catch(err => {
+          // Silent fail - server might not be ready yet
+          console.log("Error fetching gestures:", err);
+        });
+    }
+    
+    function handleGesture(gesture, data) {
+      console.log("Received gesture:", gesture, data);
+      
+      switch(gesture) {
+        case "Pan":
+          // Apply pan with the palm
+          networkGroup.position.x += data.dx * 0.5;
+          networkGroup.position.y -= data.dy * 0.5; // Inverted Y-axis
+          break;
+          
+        case "Zoom In":
+          // Zoom in with left hand pinch
+          const zoomInFactor = data.amount || 0.05;
+          const zoomInTarget = new THREE.Vector3(
+            camera.position.x * (1 - zoomInFactor),
+            camera.position.y * (1 - zoomInFactor),
+            camera.position.z * (1 - zoomInFactor)
+          );
+          // Don't go too close
+          if (zoomInTarget.length() < 50) {
+            zoomInTarget.normalize().multiplyScalar(50);
+          }
+          tweenCameraPosition(zoomInTarget);
+          break;
+          
+        case "Zoom Out":
+          // Zoom out with right hand pinch
+          const zoomOutFactor = data.amount || 0.05;
+          const zoomOutTarget = new THREE.Vector3(
+            camera.position.x * (1 + zoomOutFactor),
+            camera.position.y * (1 + zoomOutFactor),
+            camera.position.z * (1 + zoomOutFactor)
+          );
+          tweenCameraPosition(zoomOutTarget);
+          break;
+          
+        case "Rotate":
+          // Apply rotation with index finger
+          networkGroup.rotation.x += data.dy * 0.02 * rotationSensitivity;
+          networkGroup.rotation.y += data.dx * 0.02 * rotationSensitivity;
+          break;
+          
+        case "Reset View":
+          // Reset view with fist to open hand transition
+          resetCamera();
+          break;
+      }
+    }
+    
     // Animation loop
     function animate() {
       requestAnimationFrame(animate);
+      
+      // Check for gestures
+      checkForGestures();
       
       // Update tweens
       TWEEN.update();

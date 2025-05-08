@@ -145,14 +145,14 @@ class HandGestureRecognizer:
         """Return list of landmark positions for specified hand"""
         landmark_list = []
         
-        if self.results.multi_hand_landmarks:
+        if self.results and self.results.multi_hand_landmarks:
             if hand_no < len(self.results.multi_hand_landmarks):
                 hand = self.results.multi_hand_landmarks[hand_no]
                 
                 for id, lm in enumerate(hand.landmark):
                     cx, cy = int(lm.x * self.img_width), int(lm.y * self.img_height)
                     landmark_list.append((id, cx, cy, lm.z))
-        
+    
         return landmark_list
     
     def calc_distance(self, p1, p2):
@@ -331,7 +331,7 @@ class HandGestureRecognizer:
         """Detect pinch-to-zoom gestures with both hands"""
         # Need both hands detected
         if self.left_hand_id is None or self.right_hand_id is None:
-            return None
+            return None, {}
         
         # Get positions for both hands
         left_positions = self.find_positions(None, self.left_hand_id)
@@ -443,7 +443,18 @@ class HandGestureRecognizer:
     
     def recognize_gesture(self, img):
         """Recognize hand gestures for network control"""
-        self.find_positions(img)
+        # Default to no gesture for this frame
+        current_gesture = None
+        
+        # Process the current image
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        self.results = self.hands.process(img_rgb)
+        
+        # If no hands detected, return None
+        if not self.results.multi_hand_landmarks:
+            # Report no gesture detected
+            GestureHandler.set_gesture("None", {})
+            return None
         
         # Check for fist to open transition (center view)
         reset_gesture, reset_data = self.detect_fist_to_open()
@@ -469,7 +480,8 @@ class HandGestureRecognizer:
             GestureHandler.set_gesture(rotate_gesture, rotate_data)
             return rotate_gesture
         
-        # No gesture detected
+        # No specific gesture detected
+        GestureHandler.set_gesture("None", {})
         return None
 
 def start_server(port=8000):
@@ -490,20 +502,37 @@ def process_video(source=0, port=8000):
     # Start HTTP server
     httpd = start_server(port)
     
+    # Copy the HTML file to the serving directory (create if needed)
+    target_html = "network_visualization.html"
+    source_html = "networkWithLessSensTransform.html"
+    
+    # Copy the HTML file if the names don't match
+    if source_html != target_html and os.path.exists(source_html):
+        print(f"Copying {source_html} to {target_html}...")
+        with open(source_html, "r") as src:
+            with open(target_html, "w") as dst:
+                dst.write(src.read())
+    
     # Open the HTML file in the default browser
-    file_path = os.path.abspath("test.html")
     webbrowser.open(f'http://localhost:{port}/test.html')
     
     # Initialize video capture
     cap = cv2.VideoCapture(source)
     if not cap.isOpened():
         print(f"Error: Could not open video source {source}")
+        httpd.shutdown()
         return
     
     # Get video properties
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    fps = cap.get(cv2.CAP_PROP_FPS)
+    
+    # Handle invalid fps
+    if fps <= 0 or math.isnan(fps):
+        fps = 30  # Default to 30fps if not available
+    
+    print(f"Video opened: {width}x{height} at {fps}fps")
     
     # Initialize hand recognizer
     recognizer = HandGestureRecognizer()
@@ -514,62 +543,84 @@ def process_video(source=0, port=8000):
     # Recent gestures display
     recent_gestures = []
     
-    while cap.isOpened():
-        success, img = cap.read()
-        if not success:
-            print("End of video stream.")
-            break
-        
-        # Process frame and find hands
-        img = recognizer.find_hands(img)
-        
-        # Recognize gestures
-        gesture = recognizer.recognize_gesture(img)
-        if gesture:
-            # Add to recent gestures with timestamp
-            recent_gestures.append((gesture, time.time()))
-            # Keep only recent gestures (last 3 seconds)
-            recent_gestures = [g for g in recent_gestures if time.time() - g[1] < 3]
-        
-        # Display current gesture state
-        cv2.putText(img, f"Current: {recognizer.last_gesture}", 
-                   (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Display recent gestures
-        y_pos = 70
-        cv2.putText(img, "Recent Gestures:", (10, y_pos), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        for idx, (g, t) in enumerate(reversed(recent_gestures[-5:])):  # Show last 5 gestures
-            y_pos += 30
-            seconds_ago = round(time.time() - t, 1)
-            cv2.putText(img, f"{g} ({seconds_ago}s ago)", 
-                       (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
-        
-        # Calculate and display FPS
-        current_time = time.time()
-        fps_val = 1 / (current_time - prev_time) if prev_time > 0 else 0
-        prev_time = current_time
-        cv2.putText(img, f"FPS: {int(fps_val)}", 
-                   (width - 120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-        
-        # Display help text
-        cv2.putText(img, "Left Hand: Pan with palm, Zoom In with pinch", 
-                  (10, height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-        cv2.putText(img, "Right Hand: Rotate with index finger, Zoom Out with pinch, Fist->Open to reset view", 
-                  (10, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-        
-        # Display result
-        cv2.imshow("Hand Gesture Network Control", img)
-        
-        # Exit on 'q' press
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+    try:
+        while cap.isOpened():
+            success, img = cap.read()
+            if not success:
+                print("End of video stream or frame read error.")
+                break
+            
+            # Handle resize if image is too large
+            if width > 1280:
+                scale = 1280 / width
+                new_width = int(width * scale)
+                new_height = int(height * scale)
+                img = cv2.resize(img, (new_width, new_height))
+                width, height = new_width, new_height
+            
+            # Store image dimensions for landmark calculations
+            recognizer.img_width, recognizer.img_height = width, height
+            
+            # Process frame and find hands
+            img = recognizer.find_hands(img)
+            
+            # Recognize gestures
+            gesture = recognizer.recognize_gesture(img)
+            if gesture:
+                # Add to recent gestures with timestamp
+                recent_gestures.append((gesture, time.time()))
+                # Keep only recent gestures (last 3 seconds)
+                recent_gestures = [g for g in recent_gestures if time.time() - g[1] < 3]
+                recognizer.last_gesture = gesture
+            
+            # Display current gesture state
+            cv2.putText(img, f"Current: {recognizer.last_gesture}", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Display recent gestures
+            y_pos = 70
+            cv2.putText(img, "Recent Gestures:", (10, y_pos), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            for idx, (g, t) in enumerate(reversed(recent_gestures[-5:])):  # Show last 5 gestures
+                y_pos += 30
+                seconds_ago = round(time.time() - t, 1)
+                cv2.putText(img, f"{g} ({seconds_ago}s ago)", 
+                           (20, y_pos), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 1)
+            
+            # Calculate and display FPS
+            current_time = time.time()
+            fps_val = 1 / (current_time - prev_time) if prev_time > 0 else 0
+            prev_time = current_time
+            cv2.putText(img, f"FPS: {int(fps_val)}", 
+                       (width - 120, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            
+            # Display help text
+            cv2.putText(img, "Left Hand: Pan with palm, Zoom In with pinch", 
+                      (10, height - 50), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            cv2.putText(img, "Right Hand: Rotate with index finger, Zoom Out with pinch, Fist->Open to reset view", 
+                      (10, height - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+            
+            # Display result
+            cv2.imshow("Hand Gesture Network Control", img)
+            
+            # Exit on 'q' press
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
     
-    # Clean up
-    cap.release()
-    cv2.destroyAllWindows()
-    httpd.shutdown()
+    except Exception as e:
+        print(f"Error during video processing: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        # Clean up
+        print("Shutting down...")
+        cap.release()
+        cv2.destroyAllWindows()
+        httpd.shutdown()
+
+
 
 def choose_input_source():
     """Prompt user to choose input source"""
@@ -593,9 +644,9 @@ if __name__ == "__main__":
     parser.add_argument('--port', type=int, default=8000, help='Port for the HTTP server')
     
     args = parser.parse_args()
-    
+      # Uncomment and run this alone to test
     try:
-        # If source not provided, ask user
+
         source = args.source
         if source is None:
             source = choose_input_source()

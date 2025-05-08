@@ -1,0 +1,13 @@
+pan with palm movement
+zoom out with pinching out with right hand
+zoom in with pinching in the left hand
+go to the center of the network with the opening of the fist
+rotations with the move of the index finger
+
+
+
+the html file is all done, and it displays the model, and the python file should do the hand tracking to control the model, you can check the files if something is missing
+these mappings pan with palm movement zoom out with pinching out with right hand zoom in with pinching in the left hand go to the center of the network with the opening of the fist rotations with the move of the index finger
+i want python file to keep track of hand movements and the js file to show the results, also i want you make the connections, i don't know how, also the code should ask if the user need web cam, or through video
+
+also tell me how to connect the both
